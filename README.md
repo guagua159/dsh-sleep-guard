@@ -23,7 +23,7 @@ Commands are split on `&&`, `||`, `;`, `|`, and newlines before each segment is 
 
 - `run_in_background: true` — the command is meant to outlive the step.
 - A non-empty `script_path` — the contents are not part of this call and are not read.
-- Tools other than `ops_bash`, `bash`, `pwsh`, `pwsh_persistent`, and `shell`.
+- Tools other than `bash`, `pwsh`, `pwsh_persistent`, `shell`, and `ops_bash`. That last one comes from the separate [dsh-ops](https://www.npmjs.com/package/dsh-ops) package; the name is kept for profiles that install it and never matches otherwise.
 - Anything the detector throws on. Every path fails open: a guard bug must never block an unrelated command.
 
 It is hygiene, not a security boundary. Destructive-command analysis stays with a dedicated tool such as cc-safety-net, which parses shell structure far more thoroughly than this package tries to.

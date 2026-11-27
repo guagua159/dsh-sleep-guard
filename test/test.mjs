@@ -139,22 +139,28 @@ const DETECT = [
 
 /** Handler cases: the full apply() pipeline, including exemptions. */
 const HANDLER = [
-    ['deny', { name: 'ops_bash', arguments: { command: 'sleep 240' } }, 'DENY'],
-    ['deny', { name: 'ops_bash', arguments: { command: 'tail -f x' } }, 'DENY'],
+    ['deny', { name: 'pwsh', arguments: { command: 'sleep 240' } }, 'DENY'],
+    ['deny', { name: 'pwsh', arguments: { command: 'tail -f x' } }, 'DENY'],
     ['deny', { name: 'bash', arguments: { command: 'npm run dev' } }, 'DENY'],
     ['deny', { name: 'pwsh', arguments: { command: 'Start-Sleep -Seconds 30' } }, 'DENY'],
     ['deny', { name: 'shell', arguments: { command: 'watch date' } }, 'DENY'],
-    ['deny', { name: 'ops_bash', arguments: { command: '/usr/bin/sleep 300' } }, 'DENY'],
-    ['exempt', { name: 'ops_bash', arguments: { command: 'sleep 240', run_in_background: true } }, 'ALLOW'],
-    ['exempt', { name: 'ops_bash', arguments: { command: 'tail -f x', run_in_background: true } }, 'ALLOW'],
-    ['exempt', { name: 'ops_bash', arguments: { command: 'sleep 240', script_path: 'a.sh' } }, 'ALLOW'],
+    ['deny', { name: 'pwsh', arguments: { command: '/usr/bin/sleep 300' } }, 'DENY'],
+    ['deny', { name: 'pwsh_persistent', arguments: { command: 'sleep 240' } }, 'DENY'],
+    // `ops_bash` ships with the separate dsh-ops package; the name stays in
+    // SHELL_TOOLS so profiles that install it keep working. It never matches
+    // when that package is absent, which is why no live tool uses it here.
+    ['deny', { name: 'ops_bash', arguments: { command: 'sleep 240' } }, 'DENY'],
+    ['exempt', { name: 'pwsh', arguments: { command: 'sleep 240', run_in_background: true } }, 'ALLOW'],
+    ['exempt', { name: 'pwsh', arguments: { command: 'tail -f x', run_in_background: true } }, 'ALLOW'],
+    ['exempt', { name: 'pwsh', arguments: { command: 'sleep 240', script_path: 'a.sh' } }, 'ALLOW'],
+    ['exempt', { name: 'pwsh', arguments: { command: 'sleep 240', script_path: '' } }, 'DENY'],
     ['exempt', { name: 'read', arguments: { path: 'x' } }, 'ALLOW'],
-    ['exempt', { name: 'ops_bash', arguments: {} }, 'ALLOW'],
-    ['exempt', { name: 'ops_bash', arguments: null }, 'ALLOW'],
-    ['exempt', { name: 'ops_bash' }, 'ALLOW'],
+    ['exempt', { name: 'pwsh', arguments: {} }, 'ALLOW'],
+    ['exempt', { name: 'pwsh', arguments: null }, 'ALLOW'],
+    ['exempt', { name: 'pwsh' }, 'ALLOW'],
     ['exempt', {}, 'ALLOW'],
-    ['exempt', { name: 'ops_bash', arguments: { command: 'sleep 5' } }, 'ALLOW'],
-    ['exempt', { name: 'ops_bash', arguments: { command: 'ls -la' } }, 'ALLOW'],
+    ['exempt', { name: 'pwsh', arguments: { command: 'sleep 5' } }, 'ALLOW'],
+    ['exempt', { name: 'pwsh', arguments: { command: 'ls -la' } }, 'ALLOW'],
 ];
 
 /** Legal commands that must never be refused (false-positive watch list). */

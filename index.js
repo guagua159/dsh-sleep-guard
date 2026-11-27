@@ -16,7 +16,13 @@
 
 export const name = 'dsh-sleep-guard';
 
-/** Tools whose `command` argument is a shell command line. */
+/**
+ * Tools whose `command` argument is a shell command line.
+ *
+ * `ops_bash` belongs to the dsh-ops package. It is listed for profiles that
+ * install that package; when it is absent the name simply never matches, so
+ * keeping it costs nothing and avoids breaking those users on upgrade.
+ */
 const SHELL_TOOLS = new Set(['ops_bash', 'bash', 'pwsh', 'pwsh_persistent', 'shell']);
 
 /** Shortest foreground delay worth refusing, in seconds. */

@@ -70,7 +70,7 @@ Nested quoting, command substitution, subshells, and control-flow blocks all hid
 node test/test.mjs
 ```
 
-115 cases across detection, handler exemptions, and a false-positive watch list; exit code 0 means all pass. `test/ab.mjs` measures the foreground-versus-background wall-clock difference and the guard's own per-call cost.
+118 cases across detection, handler exemptions, and a false-positive watch list; exit code 0 means all pass. `test/ab.mjs` measures the foreground-versus-background wall-clock difference and the guard's own per-call cost.
 
 ## License
 

@@ -1,5 +1,7 @@
 # dsh-sleep-guard
 
+[![test](https://github.com/guagua159/dsh-sleep-guard/actions/workflows/test.yml/badge.svg)](https://github.com/guagua159/dsh-sleep-guard/actions/workflows/test.yml)
+
 A DeepSeek Harness bundle that refuses shell commands that would block the whole turn, and points the agent at background jobs instead.
 
 The agent cannot act while a foreground command is running. `sleep 300`, `tail -f`, and `npm run dev` each hold the turn for minutes or forever, so the work they wait for cannot overlap with anything else. This plugin denies those calls at `tools/pre-execute`, where the refusal is immediate and the alternative is named in the message.

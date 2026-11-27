@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "前台阻塞拦截",
+    "description": "拒绝会把整个回合卡住的 shell 命令——20 秒及以上的前台 sleep、follow 模式的日志读取、开发服务器——并在消息里给出 run_in_background 配 job_output 的替代做法。覆盖 ops_bash、bash、pwsh、pwsh_persistent、shell；引号内的文本和 run_in_background 调用会放行。检测基于模式匹配，bash -c、命令替换这类嵌套写法无法识别。"
+  }
+}

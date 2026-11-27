@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="36" height="36" viewBox="0 0 36 36" role="img" aria-label="A clock struck through: long foreground waits are refused">
+  <defs>
+    <mask id="sg-cut">
+      <rect width="36" height="36" fill="#fff"/>
+      <path d="M9.5 26.5 26.5 9.5" stroke="#000" stroke-width="6.4" stroke-linecap="round"/>
+    </mask>
+  </defs>
+  <g mask="url(#sg-cut)" fill="none" stroke="#4A5699" stroke-linecap="round" stroke-linejoin="round">
+    <circle cx="18" cy="18" r="9.6" stroke-width="2.6"/>
+    <path d="M18 11.9V18l4.4 2.7" stroke-width="2.2"/>
+  </g>
+  <path d="M9.5 26.5 26.5 9.5" stroke="#E5594F" stroke-width="3" stroke-linecap="round"/>
+</svg>

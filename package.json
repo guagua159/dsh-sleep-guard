@@ -1,0 +1,51 @@
+{
+  "name": "dsh-sleep-guard",
+  "version": "1.0.0",
+  "description": "Refuses shell commands that would block the whole turn; use run_in_background + job_output instead.",
+  "type": "module",
+  "main": "index.js",
+  "exports": {
+    ".": "./index.js",
+    "./package.json": "./package.json",
+    "./locale/*.json": "./locale/*.json",
+    "./icon": "./icon.svg"
+  },
+  "files": [
+    "index.js",
+    "cordis.patch.yml",
+    "locale/*.json",
+    "icon.svg",
+    "README.md",
+    "LICENSE",
+    "test"
+  ],
+  "keywords": [
+    "dsh-plugin",
+    "dsh",
+    "deepseek-harness",
+    "guard",
+    "sleep",
+    "timeout",
+    "background-jobs"
+  ],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/guagua159/dsh-sleep-guard.git"
+  },
+  "homepage": "https://github.com/guagua159/dsh-sleep-guard#readme",
+  "bugs": {
+    "url": "https://github.com/guagua159/dsh-sleep-guard/issues"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "test": "node test/test.mjs"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  }
+}

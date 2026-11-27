@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Sleep guard",
+    "description": "Refuses shell commands that would block the whole turn — foreground sleeps of 20 seconds or more, follow-mode log readers, and dev servers — and names run_in_background with job_output as the alternative. Covers ops_bash, bash, pwsh, pwsh_persistent and shell; quoted text and run_in_background calls pass through. Detection is pattern-based, so nested forms such as bash -c or command substitution are not caught."
+  }
+}

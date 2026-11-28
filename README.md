@@ -51,21 +51,23 @@ It is hygiene, not a security boundary. Destructive-command analysis stays with 
 
 ## Install
 
-Not on npm yet, so there is no `dsh plugin add dsh-sleep-guard` that resolves. Clone the repository next to your profile and link it instead:
+```sh
+dsh plugin --profile <name> add dsh-sleep-guard
+```
+
+`dsh plugin` forwards to pnpm, so pnpm has to be on `PATH`. Add `dsh-sleep-guard` to `dsh.profile.bundles` in the profile's `package.json` if the command does not do it for you, then restart DeepSeek Harness — an installed package only loads a fresh JavaScript module generation on restart.
+
+To work on the source instead, clone it next to the profile and link it:
 
 ```sh
 git clone https://github.com/guagua159/dsh-sleep-guard ~/.dsh/local-plugins/dsh-sleep-guard
 ```
 
-Then record it as a dependency of the profile:
-
 ```json
 { "dependencies": { "dsh-sleep-guard": "link:../../local-plugins/dsh-sleep-guard" } }
 ```
 
-and add `dsh-sleep-guard` to `dsh.profile.bundles`. The path in `link:` is relative to the profile directory; adjust the number of `..` segments if you cloned elsewhere. Link rather than copy: a `link:` dependency points at the one checkout, so edits and `git pull` are picked up, while `file:` would install a second copy that nothing keeps in sync.
-
-Restart DeepSeek Harness afterwards — an installed package only loads a fresh JavaScript module generation on restart.
+The path in `link:` is relative to the profile directory; adjust the number of `..` segments if you cloned elsewhere. Link rather than copy: a `link:` dependency points at the one checkout, so edits and `git pull` are picked up, while `file:` would install a second copy that nothing keeps in sync.
 
 ## Configure
 

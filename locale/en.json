@@ -1,6 +1,6 @@
 {
   "meta": {
     "title": "Sleep guard",
-    "description": "Refuses shell commands that would block the whole turn — foreground sleeps of 20 seconds or more, follow-mode log readers, and dev servers — and names run_in_background with job_output as the alternative. Covers bash, pwsh, pwsh_persistent and shell, plus ops_bash when the dsh-ops package is installed; quoted text and run_in_background calls pass through. Detection is pattern-based, so nested forms such as bash -c or command substitution are not caught."
+    "description": "Refuses shell commands and blocking waits that would hold the whole turn — foreground sleeps of 20 seconds or more, follow-mode log readers, dev servers, and job_output/wait_agent waits whose timeout_ms ceiling exceeds 5 minutes — and names run_in_background with job_output as the alternative. Covers bash and pwsh, including the persistent variants, plus ops_bash, pwsh_persistent and shell when a profile installs a tool with those names; quoted text, backgrounded segments, non-waiting job_output reads and run_in_background calls pass through. The sleep threshold, the wait bound and the tool-name list are configurable from the patch layer. Refusals are logged through ctx.logger.warn, capped at 100 lines per mount and one line per second. Detection is pattern-based, so nested forms such as bash -c or command substitution are not caught."
   }
 }

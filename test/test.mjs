@@ -2,8 +2,8 @@
  * Test suite for dsh-sleep-guard.
  *
  * Runs entirely in-process: no real delay is ever executed, because the guard
- * would refuse its own test command. Detector cases call findBlocking(); handler
- * cases call apply() with a stub `next`.
+ * would refuse its own test command. Detector cases call findBlocking(); guard
+ * cases call apply() with a stub context whose `tools.guard` records the guard.
  *
  * Exit code: 0 = all pass, 1 = at least one failure.
  */
@@ -25,16 +25,19 @@ const DETECT = [
     ['sleep', 'sleep 1d', 'BLOCK'],
     ['sleep', 'sleep 3600', 'BLOCK'],
     ['sleep', 'sleep 99999', 'BLOCK'],
+    ['sleep', 'sleep 1.5e3', 'BLOCK'],
+    ['sleep', 'sleep 1e1', 'ALLOW'],
     ['sleep', 'sleep abc', 'ALLOW'],
     ['sleep', 'sleep', 'ALLOW'],
     ['sleep', 'sleep.exe 300', 'BLOCK'],
+    ['sleep', 'sleep 300 2>&1', 'BLOCK'],
 
     // --- absolute and relative paths must resolve to the same command ---
     ['path', '/usr/bin/sleep 300', 'BLOCK'],
     ['path', '/bin/sleep 300', 'BLOCK'],
     ['path', './sleep 300', 'BLOCK'],
     ['path', '../bin/sleep 300', 'BLOCK'],
-    ['path', 'C:/Windows/System32/PING.EXE example.com', 'BLOCK'],
+    ['path', 'C:/Windows/System32/PING.EXE example.com', 'BLOCK', 'linux'],
     ['path', '/usr/bin/tail -f app.log', 'BLOCK'],
     ['path', '/usr/bin/tail -n 20 app.log', 'ALLOW'],
     ['path', '/usr/bin/sleep 5', 'ALLOW'],
@@ -50,6 +53,41 @@ const DETECT = [
     ['structure', 'nohup sleep 300', 'BLOCK'],
     ['structure', 'time sleep 300', 'BLOCK'],
     ['structure', 'ls\ntail -f x.log', 'BLOCK'],
+    // every line-break form separates commands, including a lone carriage return
+    ['structure', 'ls\r\ntail -f x.log', 'BLOCK'],
+    ['structure', 'ls\rtail -f x.log', 'BLOCK'],
+    ['structure', 'ls\r', 'ALLOW'],
+    // wrappers carry options of their own
+    ['wrapper', 'sudo -u root sleep 300', 'BLOCK'],
+    ['wrapper', 'sudo -E sleep 300', 'BLOCK'],
+    ['wrapper', 'sudo -- sleep 300', 'BLOCK'],
+    ['wrapper', 'sudo -u root -E sleep 300', 'BLOCK'],
+    ['wrapper', 'time -p sleep 300', 'BLOCK'],
+    ['wrapper', 'nice -n 10 sleep 300', 'BLOCK'],
+    ['wrapper', 'stdbuf -oL sleep 300', 'BLOCK'],
+    ['wrapper', 'env -i sleep 300', 'BLOCK'],
+    ['wrapper', 'env -u HOME sleep 300', 'BLOCK'],
+    ['wrapper', 'busybox sleep 300', 'BLOCK'],
+    // `command -v sleep` only prints a path
+    ['wrapper', 'command -v sleep', 'ALLOW'],
+    ['wrapper', 'command -v tail', 'ALLOW'],
+    // runners
+    ['wrapper', 'npx vite', 'BLOCK'],
+    ['wrapper', 'npx --yes vite', 'BLOCK'],
+    ['wrapper', 'npx webpack serve', 'BLOCK'],
+    ['wrapper', 'bunx nodemon app.js', 'BLOCK'],
+    ['wrapper', 'pnpm dlx vite', 'BLOCK'],
+    ['wrapper', 'yarn exec vite', 'BLOCK'],
+    ['wrapper', 'npx tsc --noEmit', 'ALLOW'],
+    ['wrapper', 'pnpm dlx serve dist', 'ALLOW'],
+    // backgrounded work returns at once
+    ['background', 'sleep 300 &', 'ALLOW'],
+    ['background', 'sleep 300&', 'ALLOW'],
+    ['background', 'npm start &', 'ALLOW'],
+    ['background', 'nohup npm start > out.log 2>&1 &', 'ALLOW'],
+    ['background', 'tail -f x & echo ok', 'ALLOW'],
+    ['background', 'sleep 300 & sleep 300', 'BLOCK'],
+    ['background', 'sleep 300 2>&1', 'BLOCK'],
 
     // --- tail ---
     ['tail', 'tail -f app.log', 'BLOCK'],
@@ -63,21 +101,44 @@ const DETECT = [
     // --- watch ---
     ['watch', 'watch -n 1 date', 'BLOCK'],
     ['watch', 'watch date', 'BLOCK'],
+    ['watch', 'watch --version', 'ALLOW'],
+    ['watch', 'watch -h', 'ALLOW'],
 
     // --- ping ---
-    // Windows: -n count, -w timeout(ms), -t infinite, -a resolve, -l size.
-    // MSYS/Linux: -c count, -w deadline(s), -W timeout(s).
-    ['ping', 'ping example.com', 'BLOCK'],
-    ['ping', 'ping -t example.com', 'BLOCK'],
-    ['ping', 'ping -c 4 example.com', 'ALLOW'],
-    ['ping', 'ping -c4 example.com', 'ALLOW'],
-    ['ping', 'ping -n 4 example.com', 'ALLOW'],
-    ['ping', 'ping -n4 example.com', 'ALLOW'],
+    // A bare `ping` is bounded on Windows (four echoes, ~3 s) but not on
+    // MSYS/Linux, so the platform is passed explicitly to keep CI deterministic
+    // on both runners.
+    ['ping', 'ping example.com', 'BLOCK', 'linux'],
+    ['ping', 'ping 127.0.0.1', 'BLOCK', 'linux'],
+    ['ping', 'ping -t example.com', 'BLOCK', 'linux'],
+    ['ping', 'ping -c 4 example.com', 'ALLOW', 'linux'],
+    ['ping', 'ping -c4 example.com', 'ALLOW', 'linux'],
+    ['ping', 'ping -n 4 example.com', 'ALLOW', 'linux'],
+    ['ping', 'ping -n4 example.com', 'ALLOW', 'linux'],
+    ['ping', 'ping --count 4 example.com', 'ALLOW', 'linux'],
     // -w is a per-reply timeout, never a count: the ping still never ends.
-    ['ping', 'ping -w 1000 example.com', 'BLOCK'],
-    ['ping', 'ping -l 64 example.com', 'BLOCK'],
-    ['ping', 'ping -a example.com', 'BLOCK'],
-    ['ping', 'ping -n 4 -w 1000 example.com', 'ALLOW'],
+    ['ping', 'ping -w 1000 example.com', 'BLOCK', 'linux'],
+    ['ping', 'ping -l 64 example.com', 'BLOCK', 'linux'],
+    ['ping', 'ping -a example.com', 'BLOCK', 'linux'],
+    ['ping', 'ping -n 4 -w 1000 example.com', 'ALLOW', 'linux'],
+    // A bare -n with no number is Linux "numeric output", not a count.
+    ['ping', 'ping -n example.com', 'BLOCK', 'linux'],
+    ['ping', 'ping6 example.com', 'BLOCK', 'linux'],
+    ['ping', 'ping6 -c 4 example.com', 'ALLOW', 'linux'],
+    // Windows: only -t runs until interrupted; the rest returns on its own.
+    ['ping', 'ping example.com', 'ALLOW', 'win32'],
+    ['ping', 'ping 127.0.0.1', 'ALLOW', 'win32'],
+    ['ping', 'ping -l 64 127.0.0.1', 'ALLOW', 'win32'],
+    ['ping', 'ping -w 1000 127.0.0.1', 'ALLOW', 'win32'],
+    ['ping', 'ping -n 4 127.0.0.1', 'ALLOW', 'win32'],
+    ['ping', 'ping -t 127.0.0.1', 'BLOCK', 'win32'],
+    // Help and version print and return on both: the one real false refusal
+    // found in the historical command corpus.
+    ['ping', 'ping -h', 'ALLOW', 'linux'],
+    ['ping', 'ping -h', 'ALLOW', 'win32'],
+    ['ping', 'ping --help', 'ALLOW', 'win32'],
+    ['ping', 'ping -V', 'ALLOW', 'win32'],
+    ['ping', 'ping --version', 'ALLOW', 'linux'],
 
     // --- follow-mode log readers ---
     ['logs', 'journalctl -f', 'BLOCK'],
@@ -89,6 +150,11 @@ const DETECT = [
     ['logs', 'docker compose logs -f', 'BLOCK'],
     ['logs', 'docker compose logs --follow web', 'BLOCK'],
     ['logs', 'docker compose logs', 'ALLOW'],
+    // compose global options shift the verb, but `logs` is still there
+    ['logs', 'docker compose -f docker-compose.yml logs -f api', 'BLOCK'],
+    ['logs', 'docker compose --file docker-compose.yml logs -f', 'BLOCK'],
+    ['logs', 'docker compose -p myproj logs -f', 'BLOCK'],
+    ['logs', 'docker compose -f docker-compose.yml logs', 'ALLOW'],
     ['logs', 'docker-compose logs -f', 'BLOCK'],
     ['logs', 'kubectl logs -f pod/web', 'BLOCK'],
     ['logs', 'kubectl logs --follow pod/web', 'BLOCK'],
@@ -101,13 +167,25 @@ const DETECT = [
     ['server', 'npm run serve', 'BLOCK'],
     ['server', 'npm run watch', 'BLOCK'],
     ['server', 'pnpm run dev', 'BLOCK'],
+    ['server', 'pnpm dev', 'BLOCK'],
     ['server', 'yarn start', 'BLOCK'],
+    ['server', 'yarn dev', 'BLOCK'],
+    ['server', 'bun dev', 'BLOCK'],
     ['server', 'npm test', 'ALLOW'],
     ['server', 'npm run build', 'ALLOW'],
     ['server', 'npm install', 'ALLOW'],
     ['server', 'npm ci', 'ALLOW'],
+    ['server', 'yarn --version', 'ALLOW'],
     ['server', 'vite', 'BLOCK'],
+    ['server', 'vite preview', 'BLOCK'],
+    ['server', 'vite --host', 'BLOCK'],
+    ['server', 'vite build', 'ALLOW'],
+    ['server', 'vite build --mode production', 'ALLOW'],
+    ['server', 'vite optimize', 'ALLOW'],
+    ['server', 'vite --version', 'ALLOW'],
     ['server', 'nodemon app.js', 'BLOCK'],
+    ['server', 'nodemon --version', 'ALLOW'],
+    ['server', 'nodemon --help', 'ALLOW'],
     ['server', 'webpack serve', 'BLOCK'],
     ['server', 'webpack --mode production', 'ALLOW'],
 
@@ -116,12 +194,49 @@ const DETECT = [
     ['powershell', 'Start-Sleep -Seconds 19', 'ALLOW'],
     ['powershell', 'Start-Sleep -Milliseconds 30000', 'BLOCK'],
     ['powershell', 'Start-Sleep -Milliseconds 5000', 'ALLOW'],
+    ['powershell', 'Start-Sleep 30', 'BLOCK'],
+    ['powershell', 'Start-Sleep 5', 'ALLOW'],
+    ['powershell', 'Start-Sleep -s 30', 'BLOCK'],
+    ['powershell', 'Start-Sleep -S 30', 'BLOCK'],
+    ['powershell', 'Start-Sleep -sec 30', 'BLOCK'],
+    ['powershell', 'Start-Sleep -m 30000', 'BLOCK'],
+    ['powershell', 'Start-Sleep -m 5000', 'ALLOW'],
+    ['powershell', 'Start-Sleep -Seconds:30', 'BLOCK'],
+    ['powershell', 'Start-Sleep -Seconds $t', 'ALLOW'],
+    ['powershell', 'Sleep 30', 'BLOCK'],
+    ['powershell', 'ls; Start-Sleep -Seconds 30', 'BLOCK'],
+    ['powershell', 'Write-Host hi; Start-Sleep -Seconds 30; Write-Host done', 'BLOCK'],
+    ['powershell', 'Get-Process | Start-Sleep 30', 'BLOCK'],
+    ['powershell', 'Start-Sleep -Seconds 30 -Verbose', 'BLOCK'],
 
     // --- quoting must not create false positives ---
     ['quoting', 'echo "sleep 240"', 'ALLOW'],
     ['quoting', "echo 'tail -f x'", 'ALLOW'],
     ['quoting', 'git commit -m "sleep 300 fix"', 'ALLOW'],
     ['quoting', 'grep "npm start" package.json', 'ALLOW'],
+
+    // --- an unpaired apostrophe must not swallow the rest of the line ---
+    ['quoting', "echo it's && sleep 300", 'BLOCK'],
+    ['quoting', "git commit -m don't care; sleep 300", 'BLOCK'],
+    ['quoting', "echo don't; sleep 300", 'BLOCK'],
+    ['quoting', "echo it's fine", 'ALLOW'],
+    ['quoting', 'echo "unterminated; sleep 300', 'BLOCK'],
+
+    // --- heredoc bodies are file contents, not commands ---
+    ['heredoc', "cat > run.sh <<'EOF'\nsleep 300\nEOF", 'ALLOW'],
+    ['heredoc', 'cat > run.sh <<EOF\nnpm start\nEOF', 'ALLOW'],
+    ['heredoc', "cat > run.sh <<'EOF'\nsleep 300\nEOF\nsleep 300", 'BLOCK'],
+    ['heredoc', "cat > a.txt <<'A'\nx\nA\ncat > b.txt <<'B'\ny\nB", 'ALLOW'],
+    // `<<` inside quotes is not an opener: the next line is still a command
+    ['heredoc', 'echo "a << b"\nsleep 300', 'BLOCK'],
+    // an unterminated heredoc swallows what follows, so nothing after it runs
+    ['heredoc', 'echo hi << x\nsleep 300', 'ALLOW'],
+    // a bit shift is not a heredoc opener: the next line still runs
+    ['heredoc', 'x=$((1<<n))\nsleep 300', 'BLOCK'],
+    ['heredoc', '(( x = 1<<3 ))\nsleep 300', 'BLOCK'],
+    ['heredoc', 'echo $((1<<n)); sleep 300', 'BLOCK'],
+    ['heredoc', 'y=$((2<<3))\ntail -f log', 'BLOCK'],
+    ['heredoc', 'x=$((1<<3))', 'ALLOW'],
 
     // --- unrelated commands ---
     ['other', 'echo hi', 'ALLOW'],
@@ -137,7 +252,7 @@ const DETECT = [
     ['other', null, 'ALLOW'],
 ];
 
-/** Handler cases: the full apply() pipeline, including exemptions. */
+/** Guard cases: the full apply() pipeline, including exemptions. */
 const HANDLER = [
     ['deny', { name: 'pwsh', arguments: { command: 'sleep 240' } }, 'DENY'],
     ['deny', { name: 'pwsh', arguments: { command: 'tail -f x' } }, 'DENY'],
@@ -161,6 +276,22 @@ const HANDLER = [
     ['exempt', {}, 'ALLOW'],
     ['exempt', { name: 'pwsh', arguments: { command: 'sleep 5' } }, 'ALLOW'],
     ['exempt', { name: 'pwsh', arguments: { command: 'ls -la' } }, 'ALLOW'],
+    // Blocking waits are judged by their requested ceiling, not by a command.
+    ['wait', { name: 'wait_agent', arguments: { timeout_ms: 3600000 } }, 'DENY'],
+    ['wait', { name: 'wait_agent', arguments: { timeout_ms: 360000 } }, 'DENY'],
+    ['wait', { name: 'wait_agent', arguments: { timeout_ms: 300000 } }, 'ALLOW'],
+    ['wait', { name: 'wait_agent', arguments: { timeout_ms: 10000 } }, 'ALLOW'],
+    ['wait', { name: 'wait_agent', arguments: {} }, 'ALLOW'],
+    ['wait', { name: 'wait_agent', arguments: null }, 'ALLOW'],
+    ['wait', { name: 'job_output', arguments: { job_id: 'x', wait: true, timeout_ms: 600000 } }, 'DENY'],
+    ['wait', { name: 'job_output', arguments: { job_id: 'x', wait: true, timeout_ms: 240000 } }, 'ALLOW'],
+    ['wait', { name: 'job_output', arguments: { job_id: 'x', wait: true } }, 'ALLOW'],
+    // A plain read returns what is already there, so its timeout is irrelevant.
+    ['wait', { name: 'job_output', arguments: { job_id: 'x', timeout_ms: 600000 } }, 'ALLOW'],
+    ['wait', { name: 'job_output', arguments: { job_id: 'x', wait: false, timeout_ms: 600000 } }, 'ALLOW'],
+    ['wait', { name: 'job_list', arguments: {} }, 'ALLOW'],
+    // A shell tool that happens to carry a timeout named for a wait is not one.
+    ['exempt', { name: 'pwsh', arguments: { command: 'git status', timeout_ms: 600000 } }, 'ALLOW'],
 ];
 
 /** Legal commands that must never be refused (false-positive watch list). */
@@ -168,6 +299,7 @@ const FALSE_POSITIVE = [
     'ls -la',
     'git status',
     'git commit -m "fix: sleep timeout handling"',
+    'git commit -m don\'t care',
     'tail -n 50 app.log',
     // `tail -f --pid=N` terminates only when that process dies, which may be never
     // or an hour from now; refusing it is deliberate, so it is not listed here.
@@ -190,13 +322,49 @@ const FALSE_POSITIVE = [
     'docker logs web',
     'sleep 5',
     'sleep 19',
+    'vite build',
+    'nodemon --version',
+    'watch --version',
+    'command -v sleep',
+    'sleep 300 &',
+    "cat > run.sh <<'EOF'\nsleep 300\nEOF",
 ];
 
-function mountHandler() {
-    const handlers = [];
-    apply({ on: (_event, fn) => { handlers.push(fn); } });
-    if (handlers.length !== 1) throw new Error(`expected 1 handler, got ${handlers.length}`);
-    return handlers[0];
+/** Config cases: [category, config, exec, expected]. Each mounts its own guard. */
+const CONFIG = [
+    ['config', undefined, { name: 'pwsh', arguments: { command: 'sleep 30' } }, 'DENY'],
+    ['config', null, { name: 'pwsh', arguments: { command: 'sleep 30' } }, 'DENY'],
+    ['config', 'nonsense', { name: 'pwsh', arguments: { command: 'sleep 30' } }, 'DENY'],
+    ['config', { minSeconds: 60 }, { name: 'pwsh', arguments: { command: 'sleep 30' } }, 'ALLOW'],
+    ['config', { minSeconds: 60 }, { name: 'pwsh', arguments: { command: 'sleep 60' } }, 'DENY'],
+    ['config', { minSeconds: 60 }, { name: 'pwsh', arguments: { command: 'Start-Sleep 30' } }, 'ALLOW'],
+    ['config', { minSeconds: 5 }, { name: 'pwsh', arguments: { command: 'sleep 5' } }, 'DENY'],
+    ['config', { minSeconds: 'abc' }, { name: 'pwsh', arguments: { command: 'sleep 30' } }, 'DENY'],
+    ['config', { minSeconds: -5 }, { name: 'pwsh', arguments: { command: 'sleep 30' } }, 'DENY'],
+    ['config', { minSeconds: 0 }, { name: 'pwsh', arguments: { command: 'sleep 30' } }, 'DENY'],
+    ['config', { shellTools: ['bash'] }, { name: 'bash', arguments: { command: 'sleep 240' } }, 'DENY'],
+    ['config', { shellTools: ['bash'] }, { name: 'pwsh', arguments: { command: 'sleep 240' } }, 'ALLOW'],
+    ['config', { shellTools: [] }, { name: 'pwsh', arguments: { command: 'sleep 240' } }, 'DENY'],
+    ['config', { shellTools: ['bash', 'custom_shell'] }, { name: 'custom_shell', arguments: { command: 'tail -f x' } }, 'DENY'],
+    // `maxWaitMs` bounds a blocking wait; omit it and the shipped 5 minutes apply.
+    ['config', { maxWaitMs: 600000 }, { name: 'job_output', arguments: { job_id: 'x', wait: true, timeout_ms: 540000 } }, 'ALLOW'],
+    ['config', { maxWaitMs: 60000 }, { name: 'job_output', arguments: { job_id: 'x', wait: true, timeout_ms: 540000 } }, 'DENY'],
+    ['config', { maxWaitMs: 60000 }, { name: 'wait_agent', arguments: { timeout_ms: 30000 } }, 'ALLOW'],
+    ['config', { maxWaitMs: 'abc' }, { name: 'wait_agent', arguments: { timeout_ms: 360000 } }, 'DENY'],
+    ['config', { maxWaitMs: -1 }, { name: 'wait_agent', arguments: { timeout_ms: 360000 } }, 'DENY'],
+];
+
+let warnings = [];
+
+function mountGuard(config) {
+    const guards = [];
+    warnings = [];
+    apply({
+        tools: { guard: (fn) => { guards.push(fn); return () => {}; } },
+        logger: { warn: (...args) => { warnings.push(args); } },
+    }, config);
+    if (guards.length !== 1) throw new Error(`expected 1 guard, got ${guards.length}`);
+    return guards[0];
 }
 
 const failures = [];
@@ -209,11 +377,11 @@ function bump(category, passed) {
     stats.set(category, row);
 }
 
-for (const [category, command, expected] of DETECT) {
+for (const [category, command, expected, platform] of DETECT) {
     let actual;
     let detail = '';
     try {
-        const reason = findBlocking(command);
+        const reason = platform === undefined ? findBlocking(command) : findBlocking(command, 20, platform);
         actual = reason === null ? 'ALLOW' : 'BLOCK';
         detail = reason ?? '';
     } catch (error) {
@@ -225,14 +393,14 @@ for (const [category, command, expected] of DETECT) {
     if (!passed) failures.push({ category, command, expected, actual, detail });
 }
 
-const handler = mountHandler();
+const guard = mountGuard();
 for (const [category, exec, expected] of HANDLER) {
     let actual;
     let detail = '';
     try {
-        const decision = await handler(exec, async () => ({ kind: 'accept' }));
-        actual = decision?.kind === 'deny' ? 'DENY' : 'ALLOW';
-        detail = decision?.reason ?? '';
+        const denial = guard(exec);
+        actual = typeof denial === 'string' ? 'DENY' : 'ALLOW';
+        detail = typeof denial === 'string' ? denial : '';
     } catch (error) {
         actual = 'THREW';
         detail = String(error?.message ?? error);
@@ -240,6 +408,45 @@ for (const [category, exec, expected] of HANDLER) {
     const passed = actual === expected;
     bump(category, passed);
     if (!passed) failures.push({ category, command: JSON.stringify(exec), expected, actual, detail });
+}
+
+for (const [category, config, exec, expected] of CONFIG) {
+    let actual;
+    let detail = '';
+    try {
+        const mounted = mountGuard(config);
+        const denial = mounted(exec);
+        actual = typeof denial === 'string' ? 'DENY' : 'ALLOW';
+        detail = typeof denial === 'string' ? denial : '';
+    } catch (error) {
+        actual = 'THREW';
+        detail = String(error?.message ?? error);
+    }
+    const passed = actual === expected;
+    bump(category, passed);
+    if (!passed) {
+        failures.push({ category, command: `config=${JSON.stringify(config)} exec=${JSON.stringify(exec)}`, expected, actual, detail });
+    }
+}
+
+// A throwing detector must fail open and say so, rather than passing silently.
+{
+    const exploding = mountGuard({ shellTools: ['bash'], minSeconds: 20 });
+    let actual;
+    let detail = '';
+    try {
+        const denial = exploding({ name: 'bash', arguments: Object.defineProperty({}, 'command', {
+            get() { throw new TypeError('detector blew up'); },
+        }) });
+        actual = denial === undefined ? 'ALLOW' : 'DENY';
+        detail = warnings.length > 0 ? `warned:${warnings.length}` : 'no-warning';
+    } catch (error) {
+        actual = 'THREW';
+        detail = String(error?.message ?? error);
+    }
+    const passed = actual === 'ALLOW' && warnings.length > 0;
+    bump('config', passed);
+    if (!passed) failures.push({ category: 'config', command: 'throwing detector fails open + logs', expected: 'ALLOW', actual, detail });
 }
 
 const falsePositives = [];
@@ -251,6 +458,58 @@ for (const command of FALSE_POSITIVE) {
         reason = `THREW: ${String(error?.message ?? error)}`;
     }
     if (reason !== null) falsePositives.push({ command, reason });
+}
+
+// Refusal logging is capped and rate-limited: a guard firing in a loop must not
+// turn the session log into a wall of one-line warnings.
+{
+    const refusals = [];
+    let burst = null;
+    apply({
+        tools: { guard: (fn) => { burst = fn; return () => {}; } },
+        logger: { warn: (...args) => { refusals.push(args.join(' ')); } },
+    });
+    for (let i = 0; i < 500; i += 1) burst({ name: 'pwsh', arguments: { command: 'sleep 300' } });
+    // 500 refusals in one burst collapse to a single line, because of the gap.
+    const burstOk = refusals.length === 1;
+    bump('logging', burstOk);
+    if (!burstOk) failures.push({ category: 'logging', command: '500 refusals in one burst', expected: '1 line', actual: `${refusals.length} lines`, detail: refusals.slice(0, 3).join(' | ') });
+
+    // Nothing is logged for a command that is allowed through.
+    const before = refusals.length;
+    burst({ name: 'pwsh', arguments: { command: 'git status' } });
+    const quietOk = refusals.length === before;
+    bump('logging', quietOk);
+    if (!quietOk) failures.push({ category: 'logging', command: 'allowed command stays quiet', expected: 'no line', actual: `${refusals.length - before} line(s)`, detail: '' });
+
+    // A logger that throws must not break the guard: checkGuards() has no
+    // try/catch of its own, so an exception here would escape into the pipeline.
+    let fragile = null;
+    apply({
+        tools: { guard: (fn) => { fragile = fn; return () => {}; } },
+        logger: { warn: () => { throw new Error('logger exploded'); } },
+    });
+    let survived;
+    try {
+        survived = typeof fragile({ name: 'pwsh', arguments: { command: 'sleep 300' } }) === 'string';
+    } catch {
+        survived = false;
+    }
+    bump('logging', survived);
+    if (!survived) failures.push({ category: 'logging', command: 'throwing logger still yields a denial', expected: 'denial string', actual: 'threw or allowed', detail: '' });
+}
+
+// An oversized command is analyzed only up to the scan bound; past it the guard
+// fails open rather than guessing.
+{
+    const filler = 'git status\n'.repeat(7000);
+    const headOk = findBlocking('sleep 300\n' + filler) !== null;
+    bump('logging', headOk);
+    if (!headOk) failures.push({ category: 'logging', command: 'blocking command at the head of an oversized line', expected: 'BLOCK', actual: 'ALLOW', detail: '' });
+
+    const tailOk = findBlocking(filler + 'sleep 300') === null;
+    bump('logging', tailOk);
+    if (!tailOk) failures.push({ category: 'logging', command: 'blocking command past the scan bound', expected: 'ALLOW (fails open)', actual: 'BLOCK', detail: '' });
 }
 
 const rows = [...stats.entries()].sort((a, b) => a[0].localeCompare(b[0]));

@@ -74,6 +74,16 @@ const LOG_LIMIT = 100;
 const LOG_GAP_MS = 1000;
 
 /**
+ * Refusal number at which the message stops assuming a one-off mistake.
+ *
+ * Three is the point where "I typed a long sleep" has usually become "I want to
+ * wait and I keep restating it". The message changes once, at that count, and
+ * never escalates again: a running count in every line would be noise, and a
+ * further escalation would only repeat what the first one said.
+ */
+const REPEAT_AT = 3;
+
+/**
  * Read the `config` a patch row carries.
  *
  * The package keeps its knobs dependency-free: there is no `Config` schema, so
@@ -712,6 +722,56 @@ export function findBlocking(command, minSeconds = MIN_SECONDS, platform = proce
 }
 
 /**
+ * The direction to try next, keyed by the shape of what was refused.
+ *
+ * These are directions, not replacement commands. The guard sees one command and
+ * no context: a `sleep 300` may be waiting for a process, for a service to come
+ * up, or may be padding that does not belong at all, and the three need different
+ * fixes. Naming one concrete rewrite would be wrong in the other two cases, and a
+ * wrong instruction is worse than a general one because the agent follows it and
+ * then fails. What is safe to say is which *kind* of change to consider — that
+ * holds whatever the surrounding context turns out to be.
+ *
+ * The mapping reads the reason this file itself produced, so it stays in step with
+ * the detector: a new reason that matches nothing falls back to the generic line.
+ *
+ * @param {string} reason - the reason `findBlocking` or `waitReason` returned.
+ * @returns {string} one sentence naming the next step.
+ */
+function guidanceFor(reason) {
+    // `watch date` says "loop" too, so the watch case is checked before the loop
+    // case; the two need different advice, and the word overlap is unavoidable.
+    if (reason.includes('watch')) {
+        return 'Start it in a background job and collect it with job_output; a command that '
+            + 're-runs itself is meant to outlive the step that starts it.';
+    }
+    // Checked before the sleep branch: a loop's reason also mentions a sleep.
+    if (reason.includes('loop')) {
+        return 'Decide what the loop is really waiting for. If it polls a condition, lift the '
+            + 'check out of the loop and call it once per step instead; if the loop is genuine '
+            + 'work, run the whole loop in a background job and collect it later.';
+    }
+    if (reason.includes('foreground sleep')) {
+        return 'Say what the delay is waiting for. If it is an external condition, replace the '
+            + 'fixed wait with one bounded check; if it only pads time, drop it; if the pause is '
+            + 'genuinely part of the work, run it in a background job.';
+    }
+    if (reason.includes('follow') || reason.includes('tail')) {
+        return 'Read the end of the log once instead of following it, or run the follower in a '
+            + 'background job and collect what it has written so far.';
+    }
+    if (reason.includes('dev server')) {
+        return 'Start it in a background job and collect it with job_output; a server is meant '
+            + 'to outlive the step that starts it.';
+    }
+    if (reason.includes('ping')) {
+        return 'Bound the run with a packet count, or start it in a background job.';
+    }
+    return 'Start it in a background job and collect it with job_output, or add a bound so it '
+        + 'returns on its own.';
+}
+
+/**
  * Mount the guard row.
  *
  * The decision is synchronous and final: `ctx.tools.guard()` runs after the
@@ -753,6 +813,18 @@ export function apply(ctx, config) {
             // A broken logger is not worth failing a tool call over.
         }
     };
+    // An agent that has been refused several times is usually rephrasing the same
+    // intent rather than changing the approach. Saying so is cheaper than another
+    // round of "a different command that blocks the same way", and it needs no
+    // judgement about the command itself.
+    let refused = 0;
+    const countTail = () => {
+        refused += 1;
+        return refused >= REPEAT_AT
+            ? ` This is refusal #${refused} in this session: rephrasing the same intent will keep `
+                + 'failing, so change the approach rather than the wording.'
+            : '';
+    };
     return ctx.tools.guard((exec) => {
         try {
             const toolName = typeof exec?.name === 'string' ? exec.name : '';
@@ -765,7 +837,7 @@ export function apply(ctx, config) {
                 note(waiting);
                 return `Refusing ${waiting}: it would hold the whole turn. `
                     + `Pass a timeout_ms of ${maxWaitMs} or less, or read the job with `
-                    + 'job_output({ wait: false }) between steps and decide again.';
+                    + `job_output({ wait: false }) between steps and decide again.${countTail()}`;
             }
             if (!shellTools.has(toolName)) return undefined;
             // A background job returns at once, so its delay costs nothing.
@@ -776,8 +848,7 @@ export function apply(ctx, config) {
             if (blocking === null) return undefined;
             note(blocking);
             return `Refusing ${blocking}: it would hold the whole turn. `
-                + 'Start it with run_in_background and collect it with job_output({ wait: true }), '
-                + 'or add a bound so it returns on its own.';
+                + `${guidanceFor(blocking)}${countTail()}`;
         } catch (error) {
             // A detector bug must never block an unrelated command, but it must
             // not vanish either: a silent guard looks like the plugin working.

@@ -478,6 +478,72 @@ for (const [category, config, exec, expected] of CONFIG) {
     if (!passed) failures.push({ category: 'config', command: 'throwing detector fails open + logs', expected: 'ALLOW', actual, detail });
 }
 
+// The refusal names a direction to try next, and the direction matches the shape
+// of what was refused. A direction, not a replacement command: the guard cannot
+// see why the call was written, so it must not claim to know the fix.
+{
+    const GUIDANCE = [
+        ['sleep', 'sleep 300', /Say what the delay is waiting for/],
+        ['sleep', 'Start-Sleep -Seconds 30', /Say what the delay is waiting for/],
+        ['loop', 'for i in $(seq 1 40); do sleep 30; done', /Decide what the loop is really waiting for/],
+        ['loop', 'until grep -q x log; do sleep 60; done', /Decide what the loop is really waiting for/],
+        ['watch', 'watch date', /a command that re-runs itself/],
+        ['follow', 'tail -f app.log', /Read the end of the log once/],
+        ['follow', 'docker compose logs -f', /Read the end of the log once/],
+        ['server', 'vite', /a server is meant to outlive/],
+        ['server', 'npm run dev', /a server is meant to outlive/],
+    ];
+    for (const [category, command, pattern] of GUIDANCE) {
+        const mounted = mountGuard();
+        const denial = mounted({ name: 'pwsh', arguments: { command } });
+        const passed = typeof denial === 'string' && pattern.test(denial);
+        bump('guidance', passed);
+        if (!passed) {
+            failures.push({ category: 'guidance', command, expected: String(pattern), actual: typeof denial === 'string' ? denial : 'ALLOW', detail: '' });
+        }
+    }
+
+    // The wait tools keep their own advice: the fix is a shorter ceiling, not a
+    // background job, and the two are not interchangeable.
+    const forWait = mountGuard();
+    const waitDenial = forWait({ name: 'job_output', arguments: { job_id: 'x', wait: true, timeout_ms: 600000 } });
+    const waitOk = typeof waitDenial === 'string' && /timeout_ms of 300000 or less/.test(waitDenial);
+    bump('guidance', waitOk);
+    if (!waitOk) failures.push({ category: 'guidance', command: 'wait tool keeps its own advice', expected: 'ceiling advice', actual: String(waitDenial), detail: '' });
+}
+
+// Repeated refusals escalate once, at the third, and then stay put: an agent that
+// is refused again is usually rephrasing the same intent, not changing approach.
+{
+    const mounted = mountGuard();
+    const lines = [];
+    for (let i = 1; i <= 5; i += 1) {
+        lines.push(mounted({ name: 'pwsh', arguments: { command: `sleep ${100 + i}` } }));
+    }
+    const escalatesAtThird = !/refusal #/.test(lines[0])
+        && !/refusal #/.test(lines[1])
+        && /refusal #3 in this session/.test(lines[2]);
+    bump('guidance', escalatesAtThird);
+    if (!escalatesAtThird) failures.push({ category: 'guidance', command: 'escalation starts at the third refusal', expected: 'no,no,yes', actual: lines.map((l) => (/refusal #/.test(l) ? 'yes' : 'no')).join(','), detail: '' });
+
+    // It does not keep escalating: the wording is added once and only the number
+    // moves after that. A second sentence per refusal would be noise.
+    const sentences = (line) => (line.match(/[.!?](?:\s|$)/g) ?? []).length;
+    const stable = sentences(lines[2]) === sentences(lines[4]);
+    bump('guidance', stable);
+    if (!stable) failures.push({ category: 'guidance', command: 'escalated text stops growing', expected: 'same sentence count', actual: `${sentences(lines[2])} vs ${sentences(lines[4])}`, detail: '' });
+
+    // Allowed calls and background jobs are not refusals, so they do not advance it.
+    const fresh = mountGuard();
+    fresh({ name: 'pwsh', arguments: { command: 'git status' } });
+    fresh({ name: 'pwsh', arguments: { command: 'sleep 300', run_in_background: true } });
+    fresh({ name: 'read', arguments: { path: 'x' } });
+    const firstCounted = fresh({ name: 'pwsh', arguments: { command: 'sleep 300' } });
+    const notCounted = !/refusal #/.test(firstCounted);
+    bump('guidance', notCounted);
+    if (!notCounted) failures.push({ category: 'guidance', command: 'only refusals advance the counter', expected: 'plain', actual: firstCounted, detail: '' });
+}
+
 const falsePositives = [];
 for (const command of FALSE_POSITIVE) {
     let reason = null;

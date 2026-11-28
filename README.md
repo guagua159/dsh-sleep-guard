@@ -30,6 +30,14 @@ A loop is checked before the per-segment pass, because splitting on `;` cuts `do
 
 A blocking wait spends the turn exactly like a foreground delay, so the two wait tools are bounded the same way. `job_output({ wait: true })` and `wait_agent` return as soon as their condition is met, so their `timeout_ms` is a ceiling rather than a planned delay — the limit is therefore generous (5 minutes) and does not forbid waiting. Exceeding it is refused with an instruction to shorten the ceiling or to read with `wait: false` between steps. `job_output` without `wait: true` returns at once and is never refused. The judge sees only the call, so a wait on a job that has already settled is refused too; the retry with a shorter ceiling then returns the output immediately.
 
+## What the refusal says
+
+Each refusal names a *direction* to try next, chosen by the shape of what was refused — a fixed delay, a polling loop, a follower, a server, a watch, or a wait ceiling. It deliberately does not name a replacement command. The guard sees one command and no context: a `sleep 300` may be waiting for a process, waiting for a service to come up, or may be padding that does not belong, and those three need different fixes. A concrete rewrite would be wrong in two of them, and a wrong instruction is worse than a general one because the agent follows it and then fails.
+
+The third refusal in a mount adds one sentence saying so, because by then the agent is usually rephrasing the same intent rather than changing the approach. The count only advances on refusals: allowed calls, `run_in_background` calls and the other bounded waits do not consume it.
+
+Measured on 88 blocked commands replayed from a session archive, the longer message costs about 55 extra tokens per refusal (52 → 107), or roughly 4.8k tokens over the whole corpus. That is below the noise floor of a real session, which is why the trade was taken; the counter sentence adds 130 more tokens each time it appears.
+
 ## What it leaves alone
 
 - `run_in_background: true` — the command is meant to outlive the step.
@@ -104,7 +112,7 @@ Two further bounds apply, both failing open. A command longer than 64 KiB is ana
 node test/test.mjs
 ```
 
-270 cases across detection, guard exemptions, config handling, blocked-wait bounds, loop bounds, logging bounds, and a false-positive watch list; exit code 0 means all pass. `test/ab.mjs` measures the foreground-versus-background wall-clock difference and the guard's own per-call cost.
+283 cases across detection, guard exemptions, config handling, blocked-wait bounds, loop bounds, refusal guidance, logging bounds, and a false-positive watch list; exit code 0 means all pass. `test/ab.mjs` measures the foreground-versus-background wall-clock difference and the guard's own per-call cost.
 ## License
 
 MIT

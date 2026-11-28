@@ -1,6 +1,6 @@
 {
   "meta": {
     "title": "前台阻塞拦截",
-    "description": "拒绝会把整个回合卡住的 shell 命令与阻塞等待——20 秒及以上的前台 sleep、follow 模式的日志读取、开发服务器、前台轮询循环，以及 timeout_ms 超过 5 分钟的 job_output/wait_agent 等待——并在消息里给出 run_in_background 配 job_output 的替代做法。覆盖 bash 和 pwsh（包括常驻版本），以及某些 profile 装了同名工具时的 ops_bash、pwsh_persistent、shell；引号内的文本、heredoc 与 here-string 正文、用 & 放到后台的段、不带 wait 的 job_output 读取、以及 run_in_background 调用会放行。sleep 阈值、等待上限和工具名清单可以在补丁层配置。拦截会通过 ctx.logger.warn 记一条日志，每个挂载点最多 100 条、每秒最多 1 条，不会无限膨胀。检测基于模式匹配，bash -c、命令替换这类嵌套写法无法识别。"
+    "description": "拒绝会把整个回合卡住的 shell 命令、前台轮询循环与阻塞等待——20 秒及以上的前台 sleep、follow 模式的日志读取、开发服务器、前台轮询循环，以及 timeout_ms 超过 5 分钟的 job_output/wait_agent 等待——并在消息里给出 run_in_background 配 job_output 的替代做法。每次拒绝会按调用形态给出一条「下一步该往哪个方向想」的提示，而不是一条具体的替换命令；同一会话里第 3 次被拒时会提醒「改思路而不是改措辞」。覆盖 bash 和 pwsh（包括常驻版本），以及某些 profile 装了同名工具时的 ops_bash、pwsh_persistent、shell；引号内的文本、heredoc 与 here-string 正文、用 & 放到后台的段、不带 wait 的 job_output 读取、以及 run_in_background 调用会放行。sleep 阈值、等待上限和工具名清单可以在补丁层配置。拦截会通过 ctx.logger.warn 记一条日志，每个挂载点最多 100 条、每秒最多 1 条，不会无限膨胀。检测基于模式匹配，bash -c、命令替换这类嵌套写法无法识别。"
   }
 }

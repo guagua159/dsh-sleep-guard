@@ -367,6 +367,35 @@ function skipLauncherOptions(words, start) {
 }
 
 /**
+ * Strip a leading PowerShell assignment, leaving the statement it assigns.
+ *
+ * PowerShell writes `$out = sleep 300`, and the value after `=` may itself be a
+ * command — the assignment does not hide it, it only prefixes it. Splitting on
+ * whitespace leaves `$out`, `=`, `sleep`, so a word-level test would either take
+ * `$out` for the command or drop `sleep` along with the operator. Stripping the
+ * prefix from the text keeps `sleep 300` as the statement, which is what runs.
+ *
+ * Also covers the no-space form (`$out=sleep 300`), member and scoped targets
+ * (`$a.b`, `$script:x`, `$env:PATH`) and `$null =`. Only a `$`-prefixed left side
+ * is stripped: `$x sleep 300` is not valid PowerShell, and leaving it alone keeps
+ * the rule from guessing.
+ *
+ * @param {string} segment
+ * @returns {string} the segment with any leading assignment prefix removed.
+ */
+function stripAssignment(segment) {
+    let text = segment;
+    // A few in a row is legal (`$a = $b = sleep 300`); the cap stops a pathological
+    // line from spinning the loop.
+    for (let i = 0; i < 8; i += 1) {
+        const stripped = text.replace(/^\s*\$[\w.:]+\s*=\s*/u, '');
+        if (stripped === text) break;
+        text = stripped;
+    }
+    return text;
+}
+
+/**
  * The command word of a segment, with leading assignments, wrappers, and
  * command runners skipped.
  *
@@ -379,7 +408,7 @@ function skipLauncherOptions(words, start) {
  *   runs a command.
  */
 function commandOf(segment) {
-    const words = segment.split(/\s+/u).filter(word => word !== '');
+    const words = stripAssignment(segment).split(/\s+/u).filter(word => word !== '');
     let i = 0;
     while (i < words.length) {
         const word = basename(words[i]);

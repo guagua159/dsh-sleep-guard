@@ -209,6 +209,29 @@ const DETECT = [
     ['powershell', 'Get-Process | Start-Sleep 30', 'BLOCK'],
     ['powershell', 'Start-Sleep -Seconds 30 -Verbose', 'BLOCK'],
 
+    // --- PowerShell assignment prefixes ---
+    // `$out = sleep 300` still runs sleep; splitting on whitespace left `$out` as the
+    // command word, so the assignment hid the delay entirely.
+    ['powershell', '$out = sleep 300', 'BLOCK'],
+    ['powershell', '$out = sleep 300 2>&1 | Out-String', 'BLOCK'],
+    ['powershell', '$out=sleep 300', 'BLOCK'],
+    ['powershell', '$null = sleep 300', 'BLOCK'],
+    ['powershell', '$a.b = sleep 300', 'BLOCK'],
+    ['powershell', '$env:X = sleep 300', 'BLOCK'],
+    ['powershell', '$script:x = sleep 300', 'BLOCK'],
+    ['powershell', '$out=Start-Sleep -Seconds 30', 'BLOCK'],
+    ['powershell', '$x = sleep 300; Write-Host hi', 'BLOCK'],
+    ['powershell', '$a = $b = sleep 300', 'BLOCK'],
+    ['powershell', '$log = tail -f app.log', 'BLOCK'],
+    // Assigning a value, or reading a variable, runs nothing that blocks.
+    ['powershell', '$out = 5', 'ALLOW'],
+    ['powershell', '$x = "hello world"', 'ALLOW'],
+    ['powershell', 'Write-Host $out', 'ALLOW'],
+    ['powershell', '$out = git status', 'ALLOW'],
+    ['powershell', '$out = 5 -eq 5', 'ALLOW'],
+    ['powershell', '$out = $(Get-Date)', 'ALLOW'],
+    ['powershell', '$t = 30; Start-Sleep -Seconds $t', 'ALLOW'],
+
     // --- quoting must not create false positives ---
     ['quoting', 'echo "sleep 240"', 'ALLOW'],
     ['quoting', "echo 'tail -f x'", 'ALLOW'],

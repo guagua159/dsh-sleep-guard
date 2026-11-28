@@ -22,8 +22,11 @@ The agent cannot act while a foreground command is running. `sleep 300`, `tail -
 | `npm`/`pnpm`/`yarn`/`bun` `start`, `dev`, `serve`, `watch`, `run <one of those>` | always |
 | `job_output` | `wait: true` with `timeout_ms` above the wait bound (5 minutes by default) |
 | `wait_agent` | `timeout_ms` above the wait bound (5 minutes by default) |
+| a `for`/`while`/`until` loop | whose body reaches a `sleep`, when the loop as a whole holds the turn for 20 seconds or more |
 
-Commands are split on `&&`, `||`, `;`, `|`, `&`, and line breaks — including a lone carriage return — before each segment is checked. A segment backgrounded with `&` returns immediately, so it is allowed: `sleep 300 &` costs nothing. Leading `VAR=value` assignments, wrappers such as `sudo`, `env`, `nohup`, `time`, `nice`, `stdbuf`, `command`, `exec`, and `busybox`, and command runners (`npx`, `bunx`, `pnpx`, `pnpm dlx`, `yarn exec`) are stepped over together with their own options, so `sudo -u root sleep 300` and `npx vite` are still seen. Heredoc bodies are treated as file contents, not commands; `<<` inside arithmetic (`x=$((1<<n))`) is a bit shift and opens nothing. Quoted text is stripped first, so `echo "sleep 240"` is allowed — but an unpaired quote stays literal text, so `git commit -m don't care; sleep 300` no longer hides the sleep.
+Commands are split on `&&`, `||`, `;`, `|`, `&`, and line breaks — including a lone carriage return — before each segment is checked. A segment backgrounded with `&` returns immediately, so it is allowed: `sleep 300 &` costs nothing. Leading `VAR=value` assignments, wrappers such as `sudo`, `env`, `nohup`, `time`, `nice`, `stdbuf`, `command`, `exec`, and `busybox`, and command runners (`npx`, `bunx`, `pnpx`, `pnpm dlx`, `yarn exec`) are stepped over together with their own options, so `sudo -u root sleep 300` and `npx vite` are still seen. Heredoc bodies and PowerShell here-strings (`@'…'@`, `@"…"@`) are treated as file contents, not commands; `<<` inside arithmetic (`x=$((1<<n))`) is a bit shift and opens nothing. Quoted text is stripped first, so `echo "sleep 240"` is allowed — but an unpaired quote stays literal text, so `git commit -m don't care; sleep 300` no longer hides the sleep.
+
+A loop is checked before the per-segment pass, because splitting on `;` cuts `do sleep 30; done` into pieces that no longer look like a loop. The hold is the whole loop, not one pass: `for i in $(seq 1 30); do sleep 10; done` is five minutes of a frozen turn even though no single sleep crosses the threshold. The iteration count is read from `$(seq 1 N)` or counted in a literal word list; `while true` has no exit path and is refused whenever its body sleeps. A loop whose body has no `sleep` is allowed, because `for f in *.txt; do wc -l "$f"; done` ends when the glob does.
 
 A blocking wait spends the turn exactly like a foreground delay, so the two wait tools are bounded the same way. `job_output({ wait: true })` and `wait_agent` return as soon as their condition is met, so their `timeout_ms` is a ceiling rather than a planned delay — the limit is therefore generous (5 minutes) and does not forbid waiting. Exceeding it is refused with an instruction to shorten the ceiling or to read with `wait: false` between steps. `job_output` without `wait: true` returns at once and is never refused. The judge sees only the call, so a wait on a job that has already settled is refused too; the retry with a shorter ceiling then returns the output immediately.
 
@@ -82,13 +85,14 @@ xargs sleep 300
 find . -exec sleep 300 \;
 (sleep 300)
 if true; then sleep 300; fi
-while true; do sleep 30; done
 $(sleep 300)
 `sleep 300`
 timeout 10 sleep 300
 ```
 
-Nested quoting, command substitution, subshells, and control-flow blocks all hide the command from a per-segment regex. Closing that gap needs an AST walker over a real shell parser; this package stays dependency-free, so the gap is documented instead of papered over.
+Nested quoting, command substitution, subshells, and `if`/`then` blocks all hide the command from a per-segment regex. Closing that gap needs an AST walker over a real shell parser; this package stays dependency-free, so the gap is documented instead of papered over.
+
+A `for`/`while`/`until` loop **is** covered, because its delay is spelled out in the loop header and body even when the `;` separators split it. A loop is only measured by the `sleep` calls inside it: a loop whose body runs a slow external program (`for i in 1 2 3 4 5 6; do ./bench.exe; done`) is not refused, since nothing in the text says how long that program takes.
 
 Two further bounds apply, both failing open. A command longer than 64 KiB is analyzed only up to that cut, since real calls average a few hundred characters and scanning a megabyte costs milliseconds per tool call. A heredoc with no terminator swallows the lines after it in real shells too, so `echo hi << x` followed by `sleep 300` is allowed: bash treats the sleep as file content.
 
@@ -100,7 +104,7 @@ Two further bounds apply, both failing open. A command longer than 64 KiB is ana
 node test/test.mjs
 ```
 
-253 cases across detection, guard exemptions, config handling, blocked-wait bounds, logging bounds, and a false-positive watch list; exit code 0 means all pass. `test/ab.mjs` measures the foreground-versus-background wall-clock difference and the guard's own per-call cost.
+270 cases across detection, guard exemptions, config handling, blocked-wait bounds, loop bounds, logging bounds, and a false-positive watch list; exit code 0 means all pass. `test/ab.mjs` measures the foreground-versus-background wall-clock difference and the guard's own per-call cost.
 ## License
 
 MIT

@@ -107,6 +107,38 @@ const SHORT_CIRCUIT = [/^--version$/u, /^--help$/u, /^-v$/u, /^-h$/u];
 const FOLLOW = [/^-f$/u, /^--follow(=.*)?$/u];
 
 /**
+ * Drop PowerShell here-string bodies.
+ *
+ * `$script = @' … '@` — and the `@" … "@` form — carries file contents or source
+ * text, exactly like a heredoc. Without this pass the body is ordinary text to
+ * every later stage: an embedded JavaScript loop reads as a shell loop, and the
+ * apostrophes inside it close `stripQuoted` at the wrong place, exposing the
+ * rest of the body.
+ *
+ * @param {string} command - the raw shell command.
+ * @returns {string} the command with here-string bodies blanked out.
+ */
+function dropHereStrings(command) {
+    if (!command.includes("@'") && !command.includes('@"')) return command;
+    const lines = command.split('\n');
+    if (lines.length === 1) return command;
+    const kept = [];
+    let terminator = '';
+    for (const line of lines) {
+        if (terminator !== '') {
+            if (line.trim() === terminator) terminator = '';
+            kept.push('');
+            continue;
+        }
+        kept.push(line);
+        // PowerShell opens a here-string with `@'` or `@"` at the end of a line.
+        const opened = /@(['"])\s*$/u.exec(line);
+        if (opened !== null) terminator = `${opened[1]}@`;
+    }
+    return kept.join('\n');
+}
+
+/**
  * Drop heredoc bodies.
  *
  * `cat > run.sh <<'EOF'` is followed by file contents, not by commands; reading
@@ -189,6 +221,11 @@ function heredocTerminator(line) {
  * rest of the line and hide a real block, so an unpaired quote stays literal
  * text and the tail keeps being analyzed.
  *
+ * The passage is replaced with one placeholder word rather than a single space,
+ * so a quoted argument still counts as one word: in `for m in "" "-M:8G"; do …
+ * done` the list length decides how many times the body runs, and collapsing the
+ * quotes to nothing would read the loop as a single pass.
+ *
  * @param {string} command
  * @returns {string}
  */
@@ -204,7 +241,7 @@ function stripQuoted(command) {
                 i += 1;
                 continue;
             }
-            out += ' ';
+            out += ' quoted ';
             i = closing + 1;
             continue;
         }
@@ -488,6 +525,81 @@ function devServerReason(word, args) {
 const START_SLEEP = /(?:^|[;&|({\n]|\s)Start-Sleep(?=\s|$)([^\n;|&}]*)/giu;
 
 /**
+ * A `for`/`while`/`until` loop body that reaches a foreground `sleep N`.
+ *
+ * `segments()` runs first and splits `do sleep 30; done` at its separators, so
+ * the body is already in pieces by the time a per-segment check sees it. What
+ * those pieces still share is the loop that encloses them, which is why the loop
+ * is matched on the whole text before segmenting.
+ *
+ * The iteration count is only read when it is written literally: `$(seq 1 40)`
+ * or a plain word list. `while true` has no count, so one pass is assumed — the
+ * command is still refused, because a loop whose sleep is already over the
+ * threshold blocks at least that long per pass.
+ */
+const LOOP_SLEEP = /\b(?:for|while|until)\b([\s\S]{0,300}?)\bdo\b([\s\S]{0,2000}?)\bdone\b/giu;
+
+/** A foreground `sleep N` inside a loop body: not backgrounded, not in a comment. */
+const LOOP_BODY_SLEEP = /(?:^|[;&|(\n]|\bdo\b|\bthen\b|\belse\b)\s*sleep\s+(\d+(?:\.\d+)?)([smhd]?)?\b(?!\s*&)/giu;
+
+/** The iteration count a `for` header states, or 1 when it cannot be read. */
+function loopIterations(header) {
+    const counted = /\$\(\s*seq\s+1\s+(\d+)\s*\)/iu.exec(header);
+    if (counted !== null) return Number(counted[1]);
+    const list = /\bin\s+([\s\S]*)$/iu.exec(header);
+    if (list === null) return 1;
+    const words = list[1].match(/"[^"]*"|'[^']*'|\S+/gu) ?? [];
+    return Math.max(1, words.length);
+}
+
+/** A `while`/`until` whose condition is a literal that never changes. */
+const UNBOUNDED_LOOP = /\bwhile\s+(?:true|:)\s*;?\s*$/iu;
+
+/**
+ * The reason a loop holds the turn for at least `minSeconds`, if any.
+ *
+ * The hold is the whole loop, not one pass: `for i in $(seq 1 30); do sleep 10;
+ * done` is five minutes of a frozen turn even though no single sleep crosses the
+ * threshold. So the per-pass sleep is multiplied by the iteration count before
+ * the comparison.
+ *
+ * A loop with no sleep in its body is skipped: `for f in *.txt; do wc -l "$f";
+ * done` finishes when the glob does, and `while read -r line; do …; done < f`
+ * ends at EOF. `while true` has no exit path at all, so it is refused whatever
+ * its body sleeps.
+ *
+ * Only the sleep is counted. Everything else in the body is assumed to cost
+ * nothing, which makes the figure a lower bound and keeps the estimate from
+ * inventing time it cannot see. A nested loop is matched by the outer one and
+ * its body sleeps are summed, which errs toward refusing a genuinely long call.
+ *
+ * @param {string} text - quote-stripped, heredoc-free command text.
+ * @param {number} minSeconds - shortest foreground hold worth refusing.
+ * @returns {string | null}
+ */
+function loopReason(text, minSeconds) {
+    for (const match of text.matchAll(LOOP_SLEEP)) {
+        const header = match[1] ?? '';
+        const body = match[2] ?? '';
+        let perPass = null;
+        for (const sleep of body.matchAll(LOOP_BODY_SLEEP)) {
+            const amount = toSeconds(`${sleep[1]}${sleep[2] ?? ''}`);
+            if (amount === null) continue;
+            perPass = (perPass ?? 0) + amount;
+        }
+        if (perPass === null) continue;
+        if (UNBOUNDED_LOOP.test(header)) return 'a `while true` loop that never returns';
+        const iterations = loopIterations(header);
+        const total = perPass * iterations;
+        if (total < minSeconds) continue;
+        return iterations > 1
+            ? `a loop holding ${total}s in the foreground (${iterations} x ${perPass}s)`
+            : `a ${total}s foreground sleep in a loop`;
+    }
+    return null;
+}
+
+/**
  * The reason a blocking wait is too long, if any.
  *
  * Both tools accept a `timeout_ms` ceiling and return the moment their condition
@@ -532,7 +644,7 @@ export function findBlocking(command, minSeconds = MIN_SECONDS, platform = proce
     // Scan the head of an oversized command instead of all of it: the tail is
     // not analyzed, which fails open rather than guessing.
     const scoped = command.length > MAX_SCAN_CHARS ? command.slice(0, MAX_SCAN_CHARS) : command;
-    const text = stripQuoted(dropRedirections(dropHeredocs(scoped)));
+    const text = stripQuoted(dropRedirections(dropHeredocs(dropHereStrings(scoped))));
 
     // PowerShell has its own delay cmdlet, which may sit inside a block.
     for (const match of text.matchAll(START_SLEEP)) {
@@ -540,6 +652,10 @@ export function findBlocking(command, minSeconds = MIN_SECONDS, platform = proce
         const seconds = sleepSeconds(args);
         if (seconds !== null && seconds >= minSeconds) return `a ${seconds}s foreground sleep`;
     }
+
+    // A loop hides its delay from the per-segment check, so it is matched first.
+    const loop = loopReason(text, minSeconds);
+    if (loop !== null) return loop;
 
     for (const { text: body, background } of segments(text)) {
         // `cmd &` returns immediately, so it never holds the turn.

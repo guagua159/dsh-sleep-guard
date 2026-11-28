@@ -1,7 +1,7 @@
 {
   "name": "dsh-sleep-guard",
-  "version": "1.4.0",
-  "description": "Refuses shell commands and blocking waits that would hold the whole turn; use run_in_background + job_output instead.",
+  "version": "1.5.0",
+  "description": "Refuses shell commands, foreground polling loops and blocking waits that would hold the whole turn; use run_in_background + job_output instead.",
   "type": "module",
   "main": "index.js",
   "exports": {

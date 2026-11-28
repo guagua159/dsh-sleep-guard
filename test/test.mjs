@@ -238,6 +238,35 @@ const DETECT = [
     ['heredoc', 'y=$((2<<3))\ntail -f log', 'BLOCK'],
     ['heredoc', 'x=$((1<<3))', 'ALLOW'],
 
+    // --- foreground polling loops ---
+    // A loop hides its delay from the per-segment check: `segments()` splits at the
+    // `;` inside `do … done`, so the loop is matched on the whole text first.
+    ['loop', 'for i in $(seq 1 40); do sleep 30; done', 'BLOCK'],
+    ['loop', 'for i in $(seq 1 20); do sleep 30; if ! tasklist //FI x; then break; fi; done', 'BLOCK'],
+    ['loop', 'for i in $(seq 1 30); do D=$(ls -td logs/*gui* | head -1); sleep 10; done', 'BLOCK'],
+    ['loop', 'while true; do sleep 30; done', 'BLOCK'],
+    ['loop', 'until grep -q DONE log; do sleep 60; done', 'BLOCK'],
+    // Iterations come from the word list, so quoted arguments must still count as words.
+    ['loop', 'for m in "" "-M:8G" "-M:20G"; do echo $m; sleep 9; done', 'BLOCK'],
+    // Total hold decides: 30 passes of 10 s is five minutes even though no single
+    // sleep crosses the 20 s threshold; 2 passes of 5 s stays under it.
+    ['loop', 'for i in $(seq 1 2); do sleep 5; done', 'ALLOW'],
+    ['loop', 'for i in $(seq 1 4); do sleep 10; done', 'BLOCK'],
+    // A loop with no sleep in its body ends when the glob or the stream does.
+    ['loop', 'for f in *.txt; do wc -l "$f"; done', 'ALLOW'],
+    ['loop', 'for i in $(seq 1 100); do echo $i; done', 'ALLOW'],
+    ['loop', 'while read -r line; do echo "$line"; done < file.txt', 'ALLOW'],
+    ['loop', 'for m in "" "-M:8G" "-M:20G"; do echo $m; done', 'ALLOW'],
+    // Below the threshold in total, and a body the guard cannot measure.
+    ['loop', 'for i in $(seq 1 40); do sleep 0.2; done', 'ALLOW'],
+    ['loop', 'for i in 1 2 3 4 5 6; do ./bench.exe --selftest; done', 'ALLOW'],
+
+    // --- here-strings are source text, not commands ---
+    ['heredoc', "$s = @'\nfor i in $(seq 1 40); do sleep 30; done\n'@\nWrite-Host $s", 'ALLOW'],
+    ['heredoc', "$s = @'\nimport x from 'y';\nfor (const a of b) { c(a); }\n'@\nSet-Content f.mjs $s", 'ALLOW'],
+    // A real loop after a closed here-string is still a command.
+    ['heredoc', "$s = @'\nsleep 300\n'@\nfor i in $(seq 1 40); do sleep 30; done", 'BLOCK'],
+
     // --- unrelated commands ---
     ['other', 'echo hi', 'ALLOW'],
     ['other', 'ls -la', 'ALLOW'],
